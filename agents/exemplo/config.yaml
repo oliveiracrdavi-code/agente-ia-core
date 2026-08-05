@@ -1,0 +1,11 @@
+# Exemplo de agente -- copie esta pasta pra criar um novo, um por cliente/projeto.
+system_prompt: |
+  Você é um assistente de atendimento. Seja educado, direto, e responda
+  só sobre o que o cliente perguntar. (Substitua por instruções reais.)
+mode: text  # text | audio | both
+llm_provider: openrouter  # ou "deepseek", ou uma base_url customizada
+llm_api_key: "cole-a-chave-do-cliente-aqui"
+llm_model: "openai/gpt-4o-mini"
+evolution_instance: "exemplo"
+evolution_base_url: "http://localhost:8080"
+evolution_api_key: "5c13308d4b02e2ddf4ef54e6d7ae7c382801445339ca92d2"

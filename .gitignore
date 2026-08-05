@@ -1,0 +1,13 @@
+.env
+agents/*/config.yaml
+!agents/exemplo/config.yaml
+__pycache__/
+*.pyc
+venv/
+*.log
+_qr_*.png
+_qr_*.json
+_qr_*.txt
+_teste_tts.mp3
+_chatterbox_test*/
+graphify-out/

@@ -1,0 +1,41 @@
+# Stack pra rodar na VM Oracle (Always Free, 4 OCPU / 24GB RAM) -- sempre
+# ativa, sem dormir. Postgres continua no Supabase (já configurado, sem
+# custo) em vez de rodar local -- simplifica e deixa mais RAM livre pra
+# quando o dashboard e o criador de SaaS forem hospedados aqui também.
+#
+# Rodar: docker compose -f docker-compose.oracle.yml up -d --build
+
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - AUTHENTICATION_API_KEY=${EVOLUTION_ADMIN_API_KEY}
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=${SUPABASE_DB_URL}
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+    volumes:
+      - evolution-data:/evolution/instances
+
+  agente-ia-core:
+    build: .
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - EVOLUTION_ADMIN_API_KEY=${EVOLUTION_ADMIN_API_KEY}
+      - EVOLUTION_BASE_URL=http://evolution-api:8080
+      - WEBHOOK_BASE_URL=http://agente-ia-core:8000
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DASHBOARD_API_KEY=${DASHBOARD_API_KEY}
+      - CORS_ALLOW_ORIGIN_REGEX=${CORS_ALLOW_ORIGIN_REGEX}
+    volumes:
+      - ./agents:/app/agents
+    depends_on:
+      - evolution-api
+
+volumes:
+  evolution-data:

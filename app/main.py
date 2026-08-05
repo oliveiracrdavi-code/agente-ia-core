@@ -165,6 +165,19 @@ async def duplicate_agent(name: str, req: DuplicateAgentRequest):
     return {"status": "created", "name": req.new_name, "cloned_from": name}
 
 
+@app.get("/atividade", dependencies=[Depends(require_dashboard_key)])
+async def atividade_geral():
+    """Agrega estatísticas de todos os agentes -- alimenta a aba
+    Atividade do dashboard (#49: 'o que mudou hoje')."""
+    out = []
+    for name in list_agents():
+        s = stats.get_stats(name)
+        if s["total_in"] > 0 or s["total_out"] > 0:
+            out.append({"agent": name, **s})
+    out.sort(key=lambda a: a["last_message_at"] or 0, reverse=True)
+    return {"agentes": out}
+
+
 @app.post("/webhook/{agent_name}")
 async def webhook(agent_name: str, request: Request):
     cfg = load_agent_config(agent_name)

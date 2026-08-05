@@ -32,7 +32,7 @@ _HF_SPACE = os.environ.get(
 # (grátis, huggingface.co/settings/tokens) dá uma cota própria bem maior.
 _HF_TOKEN = os.environ.get("HF_TOKEN", "")
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
-_PT_BR_REF_AUDIO = os.path.join(_ASSETS_DIR, "pt_br_ref.wav")
+_PT_BR_REF_AUDIO = os.path.join(_ASSETS_DIR, "vikram_ref.wav")
 
 _client: Client | None = None
 

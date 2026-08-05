@@ -83,6 +83,22 @@ async def set_webhook(cfg: AgentConfig) -> None:
         resp.raise_for_status()
 
 
+async def get_connection_state(cfg: AgentConfig) -> str:
+    """Monitor de saúde real (#23) -- consulta o estado de conexão de
+    verdade na Evolution API em vez de assumir que 'existe' == 'conectado'.
+    Retorna 'open' (conectado), 'close' (desconectado) ou 'error'."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{cfg.evolution_base_url}/instance/connectionState/{cfg.evolution_instance}",
+                headers={"apikey": cfg.evolution_api_key},
+            )
+            resp.raise_for_status()
+            return resp.json().get("instance", {}).get("state", "unknown")
+    except Exception:
+        return "error"
+
+
 async def get_qr_code(cfg: AgentConfig) -> str:
     """Returns a base64 QR code image string for pairing this instance."""
     async with httpx.AsyncClient(timeout=30.0) as client:

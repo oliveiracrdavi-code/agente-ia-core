@@ -30,6 +30,10 @@ class AgentConfig:
     evolution_api_key: str
     client: str = ""
     project: str = ""
+    # Modo horário comercial (#25) -- "HH:MM" 24h, ambos vazios = sempre ligado
+    business_hours_start: str = ""
+    business_hours_end: str = ""
+    business_hours_message: str = ""
 
 
 def load_agent_config(name: str) -> AgentConfig:
@@ -56,6 +60,13 @@ def load_agent_config(name: str) -> AgentConfig:
         evolution_api_key=data.get("evolution_api_key") or os.environ.get("EVOLUTION_ADMIN_API_KEY", ""),
         client=data.get("client", ""),
         project=data.get("project", ""),
+        business_hours_start=data.get("business_hours_start", ""),
+        business_hours_end=data.get("business_hours_end", ""),
+        business_hours_message=data.get(
+            "business_hours_message",
+            "Obrigado pela mensagem! Estamos fora do horário de atendimento no momento, "
+            "responderemos assim que possível.",
+        ),
     )
 
 
@@ -81,6 +92,16 @@ def create_agent_config(name: str, data: dict) -> None:
     os.makedirs(agent_dir, exist_ok=True)
     with open(os.path.join(agent_dir, "config.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+
+
+def get_raw_config(name: str) -> dict:
+    """Config crua (dict, não dataclass) -- usada pra duplicar um agente
+    (#24): copia tudo, troca só nome/cliente/instância na cópia."""
+    path = os.path.join(_AGENTS_DIR, name, "config.yaml")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"No config for agent '{name}'")
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def list_agents() -> list[str]:

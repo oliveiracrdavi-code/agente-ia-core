@@ -8,6 +8,7 @@ import asyncio
 import base64
 import logging
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -22,10 +23,22 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import audio, evolution
+from . import audio, evolution, stats
 from .auth import require_dashboard_key
-from .config import create_agent_config, list_agents, list_agents_detailed, load_agent_config
+from .config import (
+    AgentConfig, create_agent_config, get_raw_config, list_agents,
+    list_agents_detailed, load_agent_config,
+)
 from .llm.router import chat_completion
+
+
+def _within_business_hours(cfg: AgentConfig) -> bool:
+    """#25 -- se não configurado, sempre dentro do horário (comportamento
+    atual preservado, feature é opt-in)."""
+    if not cfg.business_hours_start or not cfg.business_hours_end:
+        return True
+    now = datetime.now().strftime("%H:%M")
+    return cfg.business_hours_start <= now <= cfg.business_hours_end
 
 logger = logging.getLogger("agente-ia-core")
 app = FastAPI(title="Agente IA Core")
@@ -109,6 +122,49 @@ async def qrcode(name: str):
     return {"qrcode_base64": qr}
 
 
+@app.get("/agents/{name}/health", dependencies=[Depends(require_dashboard_key)])
+async def agent_health(name: str):
+    """#23 -- monitor de saúde real: consulta a Evolution API de verdade,
+    não assume conectado só porque o agente existe."""
+    cfg = load_agent_config(name)
+    state = await evolution.get_connection_state(cfg)
+    s = stats.get_stats(name)
+    return {"name": name, "connection_state": state, **s}
+
+
+@app.get("/agents/{name}/conversas", dependencies=[Depends(require_dashboard_key)])
+async def agent_conversation(name: str, sender: str | None = None, limit: int = 50):
+    """#22 -- histórico real de conversa (o que o agente e o cliente
+    trocaram de verdade, não simulado)."""
+    return {"messages": stats.get_conversation(name, sender, limit)}
+
+
+class DuplicateAgentRequest(BaseModel):
+    new_name: str
+    new_evolution_instance: str
+    client: str = ""
+
+
+@app.post("/agents/{name}/duplicar", dependencies=[Depends(require_dashboard_key)])
+async def duplicate_agent(name: str, req: DuplicateAgentRequest):
+    """#24 -- clona a config de um agente existente pra um cliente novo,
+    trocando só nome/instância/cliente. Não provisiona a instância na
+    Evolution API sozinho -- isso o Davi confirma explicitamente na tela
+    de criação, igual um agente novo."""
+    try:
+        raw = get_raw_config(name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"agente '{name}' não encontrado")
+    raw["evolution_instance"] = req.new_evolution_instance
+    if req.client:
+        raw["client"] = req.client
+    try:
+        create_agent_config(req.new_name, raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "created", "name": req.new_name, "cloned_from": name}
+
+
 @app.post("/webhook/{agent_name}")
 async def webhook(agent_name: str, request: Request):
     cfg = load_agent_config(agent_name)
@@ -142,6 +198,20 @@ async def webhook(agent_name: str, request: Request):
     else:
         return {"status": "ignored", "reason": "unsupported message type for this agent's mode"}
 
+    # #27 (estatísticas) + #26 (escalonamento) -- loga toda mensagem real
+    # recebida, independente do que acontece depois.
+    escalated = stats.log_message(agent_name, sender, "in", user_text, incoming_was_audio)
+    if escalated:
+        logger.warning("ESCALONAMENTO: agente=%s sender=%s texto=%r", agent_name, sender, user_text)
+
+    # #25 -- modo horário comercial: responde com a mensagem de ausência
+    # configurada em vez de chamar o LLM (evita custo de token fora do
+    # expediente e evita prometer algo que só será resolvido depois).
+    if not _within_business_hours(cfg):
+        stats.log_message(agent_name, sender, "out", cfg.business_hours_message)
+        await evolution.send_text(cfg, sender, cfg.business_hours_message)
+        return {"status": "ok", "reason": "outside business hours"}
+
     reply_text = await chat_completion(
         provider=cfg.llm_provider,
         api_key=cfg.llm_api_key,
@@ -149,6 +219,7 @@ async def webhook(agent_name: str, request: Request):
         system_prompt=cfg.system_prompt,
         user_text=user_text,
     )
+    stats.log_message(agent_name, sender, "out", reply_text)
 
     # "audio" -- sempre responde em áudio. "both" -- espelha o formato que
     # o cliente usou (achado real: antes só mandava texto no modo "both",

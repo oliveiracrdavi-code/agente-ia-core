@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from . import audio, evolution, stats
+from . import audio, evolution, stats, wake_sleep
 from .auth import require_dashboard_key
 from .config import (
     AgentConfig, create_agent_config, get_raw_config, list_agents,
@@ -61,6 +61,7 @@ async def _preload_tts_if_needed() -> None:
     if uses_audio:
         logger.info("Pré-carregando modelo de TTS em background (agente com modo áudio detectado)...")
         asyncio.create_task(asyncio.to_thread(audio.preload_tts_model))
+    wake_sleep.start_watchdog()
 
 # Local: libera qualquer localhost. Remoto: CORS_ALLOW_ORIGIN_REGEX no
 # .env (ex: o domínio/IP real do dashboard).
@@ -91,6 +92,19 @@ class CreateAgentRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "agents": list_agents()}
+
+
+@app.post("/desktop/heartbeat", dependencies=[Depends(require_dashboard_key)])
+async def desktop_heartbeat():
+    """Chamado pelo dashboard enquanto uma aba que depende do
+    saas-creator-core local (Chat/SaaS Creator/Pesquisa/Vendedor IA) tá
+    aberta. Ver app/wake_sleep.py pro fluxo completo de liga/dorme."""
+    return await wake_sleep.heartbeat()
+
+
+@app.get("/desktop/status", dependencies=[Depends(require_dashboard_key)])
+async def desktop_status():
+    return wake_sleep.get_state()
 
 
 class TTSRequest(BaseModel):

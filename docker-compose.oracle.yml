@@ -37,5 +37,47 @@ services:
     depends_on:
       - evolution-api
 
+  # saas-creator-core -- claude CLI dentro do container precisa de login
+  # próprio (não herda a sessão interativa do Windows); ~/.claude na VM
+  # fica em volume nomeado pra sobreviver a rebuild/restart do container.
+  saas-creator-core:
+    build: ../saas-creator-core
+    restart: always
+    ports:
+      - "8500:8500"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_FALLBACK_MODEL=${OLLAMA_FALLBACK_MODEL}
+      - DASHBOARD_API_KEY=${DASHBOARD_API_KEY}
+      - CORS_ALLOW_ORIGIN_REGEX=${CORS_ALLOW_ORIGIN_REGEX}
+    volumes:
+      # dados reais dos 14 projetos já criados -- é o que "não pode se
+      # perder" na migração, então bind mount num diretório que o rsync
+      # da transferência escreve direto, não um volume anônimo do Docker.
+      - ./saas-projects:/app/saas-projects
+      - ./saas-creator-core-state/clientes_notas.json:/app/clientes_notas.json
+      - ./saas-creator-core-state/cost_log.md:/app/cost_log.md
+      - claude-cli-auth:/root/.claude
+
+  # super-dashboard -- Next.js standalone, precisa dos NEXT_PUBLIC_* como
+  # build-arg (embutido no bundle em build time, ver Dockerfile).
+  super-dashboard:
+    build:
+      context: ../super-dashboard
+      args:
+        NEXT_PUBLIC_AGENT_API_URL: http://${VM_PUBLIC_IP}:8000
+        NEXT_PUBLIC_SAAS_CREATOR_URL: http://${VM_PUBLIC_IP}:8500
+        NEXT_PUBLIC_AGENTE_CORE_URL: http://${VM_PUBLIC_IP}:8000
+        NEXT_PUBLIC_DASHBOARD_API_KEY: ${DASHBOARD_API_KEY}
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agente-ia-core
+      - saas-creator-core
+
 volumes:
   evolution-data:
+  claude-cli-auth:

@@ -70,6 +70,13 @@ O Render precisa puxar o código de um repositório Git.
    e completar esse campo, redeploy automático.
 5. Deploy.
 
+   Nota sobre voz: a resposta em áudio usa **edge-tts** (voz Antonio,
+   Microsoft Edge) — não precisa de chave nem variável de ambiente
+   extra, e cabe tranquilo nos 512MB do Render free tier. Não é a voz
+   clonada do Chatterbox de antes (esse exigia RAM que o free tier não
+   tem); testado e funcionando, mas é uma voz "de prateleira", não uma
+   clonagem da voz de referência.
+
 ## 4. [VOCÊ] Configurar o ping automático (essencial — resolve o "dormir")
 
 O Render dorme depois de ~15 min sem tráfego, o Koyeb depois de ~1h. Um

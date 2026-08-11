@@ -21,6 +21,7 @@ load_dotenv()
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from . import audio, evolution, stats
@@ -59,7 +60,7 @@ async def _preload_tts_if_needed() -> None:
             continue
     if uses_audio:
         logger.info("Pré-carregando modelo de TTS em background (agente com modo áudio detectado)...")
-        asyncio.create_task(asyncio.to_thread(audio.preload_tts_client))
+        asyncio.create_task(asyncio.to_thread(audio.preload_tts_model))
 
 # Local: libera qualquer localhost. Remoto: CORS_ALLOW_ORIGIN_REGEX no
 # .env (ex: o domínio/IP real do dashboard).
@@ -90,6 +91,18 @@ class CreateAgentRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok", "agents": list_agents()}
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+@app.post("/tts", dependencies=[Depends(require_dashboard_key)])
+async def text_to_speech(req: TTSRequest):
+    """Voz do Jarvis (aba do dashboard) -- edge-tts (voz Antonio), não a
+    TTS do navegador."""
+    audio_bytes = await audio.synthesize(req.text)
+    return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
 @app.get("/agents", dependencies=[Depends(require_dashboard_key)])

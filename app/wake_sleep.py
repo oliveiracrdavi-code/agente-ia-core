@@ -3,19 +3,20 @@ ativo) porque o saas-creator-core só existe no PC dele (Claude Code CLI
 precisa do login/assinatura local, não tem como rodar num servidor sem
 API key separada -- decisão do Davi em 2026-08-11).
 
-Fluxo:
+Fluxo (reescrito em 2026-08-12 -- pedido explícito do Davi antes de ir
+dormir: janela única de 1h, contando os DOIS sinais de atividade juntos,
+não 30min+1h separados como na versão anterior):
 1. Dashboard manda POST /desktop/heartbeat enquanto uma aba que depende do
    saas-creator-core (Chat/SaaS Creator/Pesquisa/Vendedor IA) tá aberta.
-   Cada heartbeat manda o pacote mágico de nome (inofensivo se o PC já tá
-   acordado) e atualiza `last_heartbeat`.
-2. Um loop em background (`_watchdog_loop`) roda a cada 60s: se faz mais
-   de 30 minutos sem heartbeat, checa `/pc/status` do PC (se alcançável).
-   - Claude ocupado (build rodando) -> não faz nada, espera.
-   - Claude livre pela primeira vez desde que ficou ocioso -> começa a
-     contar mais 1h de graça antes de mandar dormir.
-   - Já tava livre há mais de 1h -> manda `/pc/dormir`.
-   - PC inalcançável (já dormindo, ou porta ainda não liberada no
-     roteador) -> não faz nada, não tem o que dormir.
+   Cada heartbeat conta como atividade E manda o pacote mágico de
+   propósito (inofensivo se o PC já tá acordado).
+2. `/pc/status` local diz se tem QUALQUER claude.exe rodando -- cobre
+   tanto um build disparado pelo saas-creator-core quanto a PRÓPRIA
+   sessão interativa do Claude Code do Davi (ele pediu que isso conte
+   como atividade também, não só builds).
+3. Um loop em background (`_watchdog_loop`) roda a cada 60s: se faz mais
+   de 1h desde a última vez que QUALQUER UM dos dois sinais esteve ativo
+   (heartbeat recente OU claude.exe rodando), manda `/pc/dormir`.
 """
 
 from __future__ import annotations
@@ -40,8 +41,7 @@ WOL_PORT = 9
 LOCAL_BACKEND_URL = os.environ.get("LOCAL_BACKEND_URL", f"http://{DAVI_HOME_HOST}:8001")
 _DASHBOARD_API_KEY = os.environ.get("DASHBOARD_API_KEY", "")
 
-IDLE_BEFORE_CHECK_SECONDS = 30 * 60  # #1 -- 30min sem heartbeat antes de sequer cogitar dormir
-GRACE_AFTER_BUSY_SECONDS = 60 * 60  # #2 -- mais 1h depois que o Claude termina de construir
+IDLE_SECONDS_BEFORE_SLEEP = 60 * 60  # 1h sem heartbeat E sem claude.exe rodando
 POLL_INTERVAL_SECONDS = 60
 
 # Desligado por padrão até o Davi confirmar que o resto do sistema tá
@@ -59,10 +59,10 @@ def set_auto_sleep_enabled(enabled: bool) -> None:
 def is_auto_sleep_enabled() -> bool:
     return _auto_sleep_enabled
 
+
 _state = {
     "last_heartbeat": None,  # float | None
-    "became_free_at": None,  # float | None -- quando viu busy=False pela 1a vez ociosa
-    "ever_busy_this_idle": False,
+    "last_activity": None,  # float | None -- max(last_heartbeat, ultima vez que claude.exe apareceu rodando)
 }
 
 
@@ -80,18 +80,18 @@ def send_wake_on_lan() -> None:
 
 async def heartbeat() -> dict:
     was_idle = _state["last_heartbeat"] is None or (
-        time.time() - _state["last_heartbeat"] > IDLE_BEFORE_CHECK_SECONDS
+        time.time() - _state["last_heartbeat"] > IDLE_SECONDS_BEFORE_SLEEP
     )
-    _state["last_heartbeat"] = time.time()
+    now = time.time()
+    _state["last_heartbeat"] = now
+    _state["last_activity"] = now
     if was_idle:
-        # PC pode tá dormindo -- manda acordar. Sem custo se já tava
-        # ligado (o pacote é ignorado por qualquer PC já acordado).
+        # PC pode ta dormindo -- manda acordar. Sem custo se ja tava
+        # ligado (o pacote e ignorado por qualquer PC ja acordado).
         try:
             send_wake_on_lan()
         except Exception as exc:
             logger.warning("falha mandando WoL no heartbeat: %s", exc)
-        _state["became_free_at"] = None
-        _state["ever_busy_this_idle"] = False
     return {"status": "ok"}
 
 
@@ -119,37 +119,27 @@ async def _local_pc_sleep() -> bool:
 
 
 async def _watchdog_tick() -> None:
-    last_hb = _state["last_heartbeat"]
     if not _auto_sleep_enabled:
         return  # feature desligada -- só o wake por heartbeat continua ativo
 
-    if last_hb is None:
-        return  # nunca visitou -- nada pra fazer
-
-    idle_seconds = time.time() - last_hb
-    if idle_seconds < IDLE_BEFORE_CHECK_SECONDS:
-        return  # ainda dentro da janela normal de uso
-
     status = await _local_pc_status()
     if status is None:
-        return  # inalcançável -- nada a dormir
+        return  # inalcançável -- provavelmente já dormindo, nada a fazer
 
     if status.get("busy"):
-        _state["ever_busy_this_idle"] = True
-        _state["became_free_at"] = None
-        return  # Claude ainda construindo algo -- espera
-
-    if _state["became_free_at"] is None:
-        _state["became_free_at"] = time.time()  # primeira vez livre desde que ficou ocioso
+        _state["last_activity"] = time.time()
         return
 
-    grace_elapsed = time.time() - _state["became_free_at"]
-    if grace_elapsed >= GRACE_AFTER_BUSY_SECONDS:
+    last_activity = _state["last_activity"]
+    if last_activity is None:
+        return  # nunca viu atividade nenhuma ainda -- nada a fazer
+
+    idle_seconds = time.time() - last_activity
+    if idle_seconds >= IDLE_SECONDS_BEFORE_SLEEP:
         if await _local_pc_sleep():
-            logger.info("PC do Davi mandado dormir (ocioso + livre por %.0fs)", grace_elapsed)
+            logger.info("PC do Davi mandado dormir (ocioso ha %.0fs, sem heartbeat nem claude.exe)", idle_seconds)
             _state["last_heartbeat"] = None
-            _state["became_free_at"] = None
-            _state["ever_busy_this_idle"] = False
+            _state["last_activity"] = None
 
 
 async def _watchdog_loop() -> None:
@@ -166,12 +156,10 @@ def start_watchdog() -> None:
 
 
 def get_state() -> dict:
+    last_activity = _state["last_activity"]
     last_hb = _state["last_heartbeat"]
     return {
         "last_heartbeat_ago_seconds": (time.time() - last_hb) if last_hb else None,
-        "became_free_at_ago_seconds": (
-            time.time() - _state["became_free_at"] if _state["became_free_at"] else None
-        ),
-        "ever_busy_this_idle": _state["ever_busy_this_idle"],
+        "last_activity_ago_seconds": (time.time() - last_activity) if last_activity else None,
         "auto_sleep_enabled": _auto_sleep_enabled,
     }

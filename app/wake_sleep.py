@@ -79,19 +79,19 @@ def send_wake_on_lan() -> None:
 
 
 async def heartbeat() -> dict:
-    was_idle = _state["last_heartbeat"] is None or (
-        time.time() - _state["last_heartbeat"] > IDLE_SECONDS_BEFORE_SLEEP
-    )
     now = time.time()
     _state["last_heartbeat"] = now
     _state["last_activity"] = now
-    if was_idle:
-        # PC pode ta dormindo -- manda acordar. Sem custo se ja tava
-        # ligado (o pacote e ignorado por qualquer PC ja acordado).
-        try:
-            send_wake_on_lan()
-        except Exception as exc:
-            logger.warning("falha mandando WoL no heartbeat: %s", exc)
+    # Manda o pacote magico em TODO heartbeat, sem condicao -- bug real
+    # encontrado em 2026-08-12: so mandava se achasse que fazia >1h desde o
+    # ultimo heartbeat, mas o PC pode estar dormindo por outro motivo (teste
+    # manual via /pc/dormir, por exemplo) sem esse gap ter se acumulado
+    # ainda. Sem custo mandar sempre -- o pacote e ignorado por qualquer PC
+    # ja acordado, e evita esse falso-negativo.
+    try:
+        send_wake_on_lan()
+    except Exception as exc:
+        logger.warning("falha mandando WoL no heartbeat: %s", exc)
     return {"status": "ok"}
 
 

@@ -107,6 +107,20 @@ async def desktop_status():
     return wake_sleep.get_state()
 
 
+class AutoSleepRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/desktop/auto-sleep", dependencies=[Depends(require_dashboard_key)])
+async def desktop_auto_sleep(req: AutoSleepRequest):
+    """Liga/desliga o auto-dormir do PC -- desligado por padrão (pedido do
+    Davi em 2026-08-11, até ele confirmar que o resto do sistema tá
+    pronto). O wake por heartbeat continua funcionando de qualquer jeito,
+    isso só controla se o watchdog manda o PC dormir sozinho."""
+    wake_sleep.set_auto_sleep_enabled(req.enabled)
+    return {"auto_sleep_enabled": req.enabled}
+
+
 class TTSRequest(BaseModel):
     text: str
 

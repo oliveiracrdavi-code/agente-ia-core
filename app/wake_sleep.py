@@ -44,6 +44,21 @@ IDLE_BEFORE_CHECK_SECONDS = 30 * 60  # #1 -- 30min sem heartbeat antes de sequer
 GRACE_AFTER_BUSY_SECONDS = 60 * 60  # #2 -- mais 1h depois que o Claude termina de construir
 POLL_INTERVAL_SECONDS = 60
 
+# Desligado por padrão até o Davi confirmar que o resto do sistema tá
+# pronto -- pedido explícito dele em 2026-08-11 (não remover a feature,
+# só não disparar sozinha ainda). Liga com POST /desktop/auto-sleep
+# {"enabled": true}.
+_auto_sleep_enabled = os.environ.get("AUTO_SLEEP_ENABLED", "false").lower() == "true"
+
+
+def set_auto_sleep_enabled(enabled: bool) -> None:
+    global _auto_sleep_enabled
+    _auto_sleep_enabled = enabled
+
+
+def is_auto_sleep_enabled() -> bool:
+    return _auto_sleep_enabled
+
 _state = {
     "last_heartbeat": None,  # float | None
     "became_free_at": None,  # float | None -- quando viu busy=False pela 1a vez ociosa
@@ -105,6 +120,9 @@ async def _local_pc_sleep() -> bool:
 
 async def _watchdog_tick() -> None:
     last_hb = _state["last_heartbeat"]
+    if not _auto_sleep_enabled:
+        return  # feature desligada -- só o wake por heartbeat continua ativo
+
     if last_hb is None:
         return  # nunca visitou -- nada pra fazer
 
@@ -155,4 +173,5 @@ def get_state() -> dict:
             time.time() - _state["became_free_at"] if _state["became_free_at"] else None
         ),
         "ever_busy_this_idle": _state["ever_busy_this_idle"],
+        "auto_sleep_enabled": _auto_sleep_enabled,
     }
